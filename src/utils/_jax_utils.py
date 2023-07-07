@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+import equinox as eqx
 
 def model_apply(model, partition_fn = eqx.is_array):
 	"""create an apply function with signature 
@@ -13,7 +14,13 @@ def model_apply(model, partition_fn = eqx.is_array):
 
 
 def smap(f, n_args: int=1, mapped_args=None):
-
+    """
+    Sequential map
+    Args:
+        f: func to map
+        n_args: number of args passed to f
+        mapped_args: args to map over leading axis (default all)
+    """
     if mapped_args is None:
         mapped_args = list(range(n_args))
     idxs = []

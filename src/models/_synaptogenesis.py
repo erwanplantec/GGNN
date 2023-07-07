@@ -39,14 +39,17 @@ class SynaptoGenesis(eqx.Module):
     max_nodes: int
     max_edges: int
     eincr_fn: t.Callable
+    self_loops: bool
     #-------------------------------------------------------------------
 
-    def __init__(self, prob_fn, query_fn, max_nodes, max_edges):
+    def __init__(self, prob_fn: t.Callable, query_fn: t.Callable, max_nodes: int, 
+                 max_edges: int, self_loops: bool = False):
         
         self.query_fn = query_fn
         self.prob_fn = prob_fn
         self.max_nodes = max_nodes
         self.max_edges = max_edges
+        self.self_loops = self_loops
         
         mat_e = incr_matrix(max_edges)
         def incr_edges(aedges, n):
@@ -87,6 +90,8 @@ class SynaptoGenesis(eqx.Module):
         scores = evmap(evmap(jnp.dot, in_axes=(None, 0)), in_axes=(0, None))(queries, nodes)
         scores = jnp.clip(scores, -1e4, 1e4)
         scores = scores - (1.-anodes[None, :])*1e10
+        if not self.self_loops:
+            scores = scores - jnp.identity(self.max_nodes)*1e10
 
         if mode == "soft":
             select = jnp.where(gens, jr.categorical(key_samp, scores, axis=-1).astype(int), 0) 

@@ -1,10 +1,12 @@
-from srs.models import GGraph
+from src.models import GGraph
 
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+import jraph
 import networkx as nx
 import matplotlib.pyplot as plt
+import typing as t
 
 def jraph_to_nx(jraph_graph: jraph.GraphsTuple) -> nx.Graph:
     nodes, edges, receivers, senders, _,_, _, anodes, aedges = jraph_graph
@@ -74,7 +76,8 @@ def draw_graph_emb(jraph_graph, **draw_kws):
     )
     
 def draw_graphs(graphs: t.Iterable[GGraph], n: int, nrows: int, ncols: int, 
-                draw_fn: t.Callable = nx.draw_spring, rmv_isolates: bool=True, **draw_kws):
+                draw_fn: t.Callable = nx.draw_spring, rmv_isolates: bool=True, 
+                title_fn: t.Callable = lambda i: f"step {i}", **draw_kws):
     
     fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=(16, 16))
     for n in range(n):
@@ -86,5 +89,5 @@ def draw_graphs(graphs: t.Iterable[GGraph], n: int, nrows: int, ncols: int,
         draw_fn(
             nxg, node_size=20, ax=axs[i, j], **draw_kws
         )
-        axs[i, j].set_title(f"step {n}")
+        axs[i, j].set_title(title_fn(n))
     plt.show()

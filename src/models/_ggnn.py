@@ -11,6 +11,7 @@ class GGNN(eqx.Module):
 
     """
     Growing Graph Neural Network wrapper class
+    allows to optimize initialization parameters also
 
     Args:
         model (eqx.Module): graph update model
@@ -38,12 +39,14 @@ class GGNN(eqx.Module):
 
     #-------------------------------------------------------------------
 
-    def __call__(self, graph: GGraph, key: jr.PRNGKey, dev_steps: int=20, return_traj: bool=False):
+    def __call__(self, graph: GGraph, key: jr.PRNGKey, dev_steps: int=20, 
+                 return_traj: bool=False, init: bool=True):
 
-        graph = graph._replace(
-            nodes = graph.nodes.at[:self.n_init_nodes].set(self.init_nodes),
-            edges = graph.edges.at[:self.n_init_edges].set(self.init_edges)
-        )
+        if init:
+            graph = graph._replace(
+                nodes = graph.nodes.at[:self.n_init_nodes].set(self.init_nodes),
+                edges = graph.edges.at[:self.n_init_edges].set(self.init_edges)
+            )
 
         [graph, _], graphs = rollout(self.model, graph, key, dev_steps)
         if return_traj:
