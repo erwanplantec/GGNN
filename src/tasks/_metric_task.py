@@ -10,10 +10,12 @@ import typing as t
 
 
 def MetricTask(statics: t.Collection, init_graph: GGraph, metrics: list,
-               targets: jnp.array, grow_iters: int = 20, apply_all_timesteps: bool = True):
+               targets: jnp.array, grow_iters: int = 20, apply_all_timesteps: bool = True,
+               weights: jnp.array=None):
     
     metric_fn = GraphMetrics(metrics)
-    
+    if apply_all_timesteps and weights is None:
+        weights = jnp.ones((grow_iters,))
     if set(metrics).issubset(set(jax_graph_metrics)):
         @partial(jax.vmap, in_axes=(None, 0))
         def _eval(key, params):
@@ -21,7 +23,8 @@ def MetricTask(statics: t.Collection, init_graph: GGraph, metrics: list,
             graph, graphs = model(init_graph, key, grow_iters, True)
             if apply_all_timesteps:
                 ms = jax.vmap(metric_fn)(graphs) #(steps, n_metrics)
-                fit = jnp.mean((ms-targets[None, ...])**2)
+                fit = jnp.sum((ms-targets[None, ...])**2, axis=-1) * weights #(steps,)
+                fit = jnp.mean(fit)
             else:
                 m = metric_fn(graph)
                 fit = jnp.mean((m-targets)**2)
