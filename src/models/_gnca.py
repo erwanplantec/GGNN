@@ -41,14 +41,14 @@ class GNCA(eqx.Module):
     @ejit
     def __call__(self, graph: jraph.GraphsTuple, key: jr.PRNGKey):
         
-        if self.use_edges:
+        if not self.use_edges:
             #1. Compute messages
             m = jax.vmap(self.message_fn)(graph.nodes)
             #2. Aggregate messages
             m = self.aggr_fn(m[graph.senders], graph.receivers, graph.nodes.shape[0])
         else:
             #1. Compute messages
-            m = jax.vmap(self.message_fn)(jnp.concatenate([graph.nodes[graph.senders], edges], axis=-1))
+            m = jax.vmap(self.message_fn)(jnp.concatenate([graph.nodes[graph.senders], graph.edges], axis=-1))
             #2. Aggregate messages
             m = self.aggr_fn(m, graph.receivers, graph.nodes.shape[0])
 
