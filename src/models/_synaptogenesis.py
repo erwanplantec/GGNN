@@ -15,6 +15,9 @@ from src.models._graph import GGraph
 #=================================================================================================
 #=================================================================================================
 
+def cosine_similarity(x, y):
+    return jnp.dot(x, y) / (jnp.sqrt(jnp.sum(x**2)*jnp.sum(y**2))+1e-8)
+
 class SynaptoGenesis(eqx.Module):
 
     """
@@ -39,16 +42,18 @@ class SynaptoGenesis(eqx.Module):
     max_nodes: int
     max_edges: int
     eincr_fn: t.Callable
+    dist_fn: t.Callable
     self_loops: bool
     #-------------------------------------------------------------------
 
     def __init__(self, prob_fn: t.Callable, query_fn: t.Callable, max_nodes: int, 
-                 max_edges: int, self_loops: bool = False):
+                 max_edges: int, dist_fn: t.Callable=cosine_similarity, self_loops: bool = False):
         
         self.query_fn = query_fn
         self.prob_fn = prob_fn
         self.max_nodes = max_nodes
         self.max_edges = max_edges
+        self.dist_fn = dist_fn
         self.self_loops = self_loops
         
         mat_e = incr_matrix(max_edges)
@@ -64,7 +69,7 @@ class SynaptoGenesis(eqx.Module):
     def __call__(self, graph: GGraph, key: jr.PRNGKey, mode: str = "soft"):
         
         key_prob, key_edges, key_samp = jr.split(key, 3)
-        nodes, edges, rec, send, _, _, _, anodes, aedges = graph
+        nodes, edges, rec, send, anodes, aedges, *_ = graph
         nids = jnp.arange(self.max_nodes)
         eids = jnp.arange(self.max_edges)
         n_active = anodes.sum().astype(int)
@@ -87,12 +92,12 @@ class SynaptoGenesis(eqx.Module):
         nsend = (send * (1-mask_new_edges) + nsend).astype(int)
         
         queries = evmap(self.query_fn)(nodes)
-        scores = evmap(evmap(jnp.dot, in_axes=(None, 0)), in_axes=(0, None))(queries, nodes)
+        values = nodes
+        scores = evmap(evmap(self.dist_fn, in_axes=(None, 0)), in_axes=(0, None))(queries, values)
         scores = jnp.clip(scores, -1e4, 1e4)
         scores = scores - (1.-anodes[None, :])*1e10
         if not self.self_loops:
             scores = scores - jnp.identity(self.max_nodes)*1e10
-
         if mode == "soft":
             select = jnp.where(gens, jr.categorical(key_samp, scores, axis=-1).astype(int), 0) 
         elif mode == "hard":
@@ -138,7 +143,7 @@ class SynapticDegeneracy(eqx.Module):
     def __call__(self, graph: GGraph, key: jr.PRNGKey):
         
         key, key_prob = jr.split(key)
-        nodes, edges, rec, send, _, _, _, anodes, aedges = graph
+        nodes, edges, rec, send, anodes, aedges, *_ = graph
 
         probs = jax.vmap(self.prob_fn)(edges)[:,0] * aedges
         degens = jr.uniform(key_prob, (self.max_edges,)) < probs

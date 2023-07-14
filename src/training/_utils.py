@@ -2,6 +2,9 @@ from tqdm import tqdm
 import jax
 import jax.numpy as jnp
 from jax.experimental import host_callback
+import matplotlib.pyplot as plt
+from IPython.display import clear_output
+from functools import partial
 
 def progress_bar_scan(num_samples, message=None):
     "Progress bar for a JAX scan"
@@ -75,6 +78,47 @@ def progress_bar_scan(num_samples, message=None):
         return wrapper_progress_bar
 
     return _progress_bar_scan
+
+
+
+
+def plot_scan(func, freq=100, getter=lambda x, y: (x, x, y), clear=True):
+
+    xs = []
+    ys = []
+
+    def _plot():
+        if clear:
+            clear_output()
+        plt.scatter(xs, ys)
+        plt.show()
+
+    def _save_and_plot(ixy):
+        i, x, y = ixy
+        xs.append(x)
+        ys.append(y)
+        if not i % freq and i:
+            _plot() 
+
+    def _func(carry, x):
+        carry, y = func(carry, x)
+        host_callback.call(
+            _save_and_plot,
+            getter(x, y)
+        )
+        return carry, y
+
+    return _func
+
+if __name__ == "__main__":
+
+    @plot_scan
+    def f(c, x):
+        return c+1, c+1
+
+    _ = jax.lax.scan(f, 0, jnp.arange(1000))
+
+
 
 
 

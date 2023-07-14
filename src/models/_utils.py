@@ -40,6 +40,28 @@ def rollout(model: t.Callable, graph: GGraph, key: jr.PRNGKey, steps: int):
 
     return jax.lax.scan(_step, [graph, key], jnp.arange(steps))
 
+def remove_isolates(graph: GGraph):
+
+    nodes, edges, rec, send, anodes, aedges, *_ = graph
+    n_nodes = nodes.shape[0]
+
+    are_rec = jax.ops.segment_sum(jnp.ones((n_nodes,)), rec, n_nodes)
+    arent_rec = jnp.where(are_rec>0., 0., 1.)
+
+    are_send = jax.ops.segment_sum(jnp.ones((n_nodes,)), send, n_nodes)
+    arent_semd = jnp.where(are_send>0., 0., 1.)
+
+    are_iso = arent_rec * arent_send
+
+    # remove isolated nodes
+    nanodes = anodes * degens.astype(float)
+    idxs = jnp.argsort(1.-nanodes)
+    nanodes = nanodes[idxs]
+    new_nodes = jnp.where(nanodes[:, None], nodes[idxs], 0.)
+
+    # relabel edges with new indexes
+
+    return graph._replace(nodes=nodes)
 
 def shard_ggraph(graph: GGraph, sharding: PositionalSharding):
     nodes = jax.device_put(graph.nodes, sharding)

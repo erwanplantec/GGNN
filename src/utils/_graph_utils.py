@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import typing as t
 
 def jraph_to_nx(jraph_graph: jraph.GraphsTuple) -> nx.Graph:
-    nodes, edges, receivers, senders, _,_, _, anodes, aedges = jraph_graph
+    nodes, edges, receivers, senders, anodes, aedges, *_ = jraph_graph
     n_nodes = int(anodes.sum())
     n_edges = int(aedges.sum())
     nx_graph = nx.DiGraph()

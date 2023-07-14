@@ -6,5 +6,4 @@ from src.models._graph import GGraph
 from src.models._gnn import GNN
 from src.models._ignn import IGNN
 from src.models._inject import NodeMetricsInjection
-from src.models._structural_noise import SynapticNoise
 from src.models._gnca import GNCA

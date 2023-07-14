@@ -27,16 +27,18 @@ class NeuroGenesis(eqx.Module):
     nincr_fn: t.Callable
     eincr_fn: t.Callable
     prob_fn: t.Callable
+    sigma: float
     max_nodes: int
     max_edges: int
     #-------------------------------------------------------------------
     
     def __init__(self, prob_fn: t.Callable, max_nodes: int, max_edges: int,
-                 conditional_call: bool = False):
+                 conditional_call: bool = False, sigma: float = 0.):
         
         self.prob_fn = prob_fn
         self.max_nodes = max_nodes
         self.max_edges = max_edges
+        self.sigma = sigma
         
         mat_n = incr_matrix(max_nodes)
         def incr_nodes(anodes, n):
@@ -58,7 +60,7 @@ class NeuroGenesis(eqx.Module):
     def __call__(self, graph: GGraph, key: jr.PRNGKey):
         
         key_div, key_nodes, key_edges = jr.split(key, 3)
-        nodes, edges, rec, send, _, _, _, anodes, aedges = graph
+        nodes, edges, rec, send, anodes, aedges, *_ = graph
         n_active = anodes.sum().astype(int)
         n_edges = aedges.sum().astype(int)
         ids = jnp.arange(self.max_nodes)
@@ -75,9 +77,6 @@ class NeuroGenesis(eqx.Module):
         mask_new_nodes = nanodes * (1-anodes)
         mask_new_edges = naedges * (1-aedges)
         
-        new_nodes = nodes + jr.normal(key_nodes, nodes.shape) * mask_new_nodes[..., None] 
-        new_edges = edges + jr.normal(key_edges, edges.shape) * mask_new_edges[..., None] 
-        
         trgets = jnp.cumsum(divs) * divs - divs
         trgets = jnp.where(divs, trgets.astype(int), -1) + n_edges * divs.astype(int)
         nsend = jax.ops.segment_sum(ids, trgets, self.max_edges)
@@ -85,6 +84,11 @@ class NeuroGenesis(eqx.Module):
         
         nrec = (jnp.cumsum(mask_new_edges)-1) * mask_new_edges + (n_active * mask_new_edges)
         nrec = (rec * (1-mask_new_edges) + nrec).astype(int)
+
+        #new_nodes = nodes + jr.normal(key_nodes, nodes.shape) * mask_new_nodes[..., None] 
+        new_nodes = jax.ops.segment_sum(nodes, trgets, self.max_nodes)
+        ne_nodes = new_nodes + (jr.normal(key_nodes, nodes.shape) * mask_new_nodes[..., None] * self.sigma)
+        new_edges = edges + jr.normal(key_edges, edges.shape) * mask_new_edges[..., None] 
         
         return graph._replace(nodes=new_nodes,
                               edges=new_edges,
@@ -117,7 +121,7 @@ class NeuroDegeneracy(eqx.Module):
     def __call__(self, graph: GGraph, key:jr.PRNGKey):
         
         key, key_prob = jr.split(key)
-        nodes, edges, rec, send, _, _, _, anodes, aedges = graph
+        nodes, edges, rec, send, anodes, aedges, *_ = graph
         nids = jnp.arange(self.max_nodes)
 
         # 1. nodes degen

@@ -15,17 +15,22 @@ def EvosaxTrainer(eval_fn: t.Callable,
                   gens: int = 100,
                   progress_bar: bool = True,
                   n_repeats: int = 1,
-                  use_vmap: bool = True)->t.Callable:
+                  use_vmap: bool = True,
+                  var_penalty: float = 0.)->t.Callable:
 
     """Wrapper for evosax."""
 
     if n_repeats > 1:
         if use_vmap:
             mapped_eval = jax.vmap(eval_fn, in_axes=(0, None))
-            eval_fn = lambda k, p: jnp.mean(mapped_eval(jr.split(k, n_repeats), p), axis=0)
         else:
             mapped_eval = smap(eval_fn, 2, (0, ))
-            eval_fn = lambda k, p: jnp.mean(mapped_eval(jr.split(k, n_repeats), p), axis=0)
+
+        def eval_fn(k, p):
+            fits = mapped_eval(jr.split(k, n_repeats), p) #(nrep, pop)"
+            avg = jnp.mean(fits, axis=0) #(pop,)
+            var = jnp.var(fits, axis=0) #(pop,)
+            return avg - var*var_penalty
          
     def evo_step(carry, x):
         key, es_state = carry

@@ -26,6 +26,35 @@ def out_degrees(g: GGraph):
 def degrees(g: GGraph):
     return in_degrees(g) + out_degrees(g)
 
+@partial(jax.jit, static_argnames=("min_degree", "max_degree"))
+def degree_distribution(g: GGraph, min_degree: int=0, max_degree: int=10):
+    degs = jnp.clip(degrees(g).astype(int), min_degree, max_degree)
+    degs = jnp.where(g.active_nodes, degs, -1)
+    distr = jax.ops.segment_sum(jnp.ones((g.nodes.shape[0])),
+                                degs, max_degree-min_degree)
+    return distr / (distr.sum()+1e-8)
+
+@partial(jax.jit, static_argnames=("min_degree", "max_degree"))
+def out_degree_distribution(g: GGraph, min_degree: int=0, max_degree: int=10):
+    degs = jnp.clip(out_degrees(g).astype(int), min_degree, max_degree)
+    distr = jax.ops.segment_sum(jnp.ones((g.nodes.shape[0])),
+                                degs, max_degree-min_degree)
+    return distr / (distr.sum()+1e-8)
+
+@partial(jax.jit, static_argnames=("min_degree", "max_degree"))
+def in_degree_distribution(g: GGraph, min_degree: int=0, max_degree: int=10):
+    degs = jnp.clip(in_degrees(g).astype(int), min_degree, max_degree)
+    distr = jax.ops.segment_sum(jnp.ones((g.nodes.shape[0])),
+                                degs, max_degree-min_degree)
+    return distr / (distr.sum()+1e-8)
+
+@jax.jit
+def density(g: GGraph):
+    m = g.active_edges.sum()
+    n = g.active_nodes.sum()
+
+    return m / (n*(n-1))
+
 @jax.jit
 def s_metric(g: GGraph):
     d = degrees(g)
@@ -39,6 +68,9 @@ def rich_club(nxg):
     _nxg = nxg.copy()
     _nxg.remove_edges_from(nx.selfloop_edges(_nxg))
     return nx.rich_club_coefficient(_nxg)
+
+def n_louvain_communities(dnxg, **kwargs):
+    return len(nx.louvain_communities(dnxg, **kwargs))
 
 
 graph_metrics_fn = {
@@ -56,9 +88,12 @@ graph_metrics_fn = {
     #"non_randomness": lambda g, dnxg, nxg: nx.non_randomness(nxg)[1], #Error if not connected
     #"sw_omega":       lambda g, dnxg, nxg: nx.omega(nxg), #Slow and error if not connected
     "sw_sigma":       lambda g, dnxg, nxg: nx.sigma(nxg) if nx.is_connected(nxg) else 0., #Error if not connected
-    "rich_club":      lambda g, dnxg, nxg: rich_club(nxg) #Error if self-loops
+    "rich_club":      lambda g, dnxg, nxg: rich_club(nxg), #Error if self-loops
     # "wiener_index":   lambda g, dnxg, nxg: nx.wiener_index(nxg), #Can throw inf
     #"fractal_dims":   lambda g, dnxg, nxg: cbb(network(nxg), 1, True)
+    "communities":    lambda g, dnxg, nxg: len(nx.connected_components(nxg)),
+    "isolates":       lambda g, dnxg, nxg: nx.number_of_isolates(nxg),
+    "assortativity":    lambda g, dnxg, nxg: nx.degree_pearson_correlation_coefficient(nxg)
 }
 
 graph_metrics_names = list(graph_metrics_fn.keys())

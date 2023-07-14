@@ -16,9 +16,10 @@ class GGraph(t.NamedTuple):
     edges: jnp.array
     receivers: jnp.array
     senders: jnp.array
-    globals: jnp.array
-    n_node: int
-    n_edge: int
     active_nodes: jnp.array #mask of active nodes (1. if active)
     active_edges: jnp.array #mask of active edges (1. if active)
+    n_node: int = 1
+    n_edge: int = 1
+    time: int = 0
+    globals: jnp.array = None
 
