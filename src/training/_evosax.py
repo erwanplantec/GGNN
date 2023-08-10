@@ -1,5 +1,5 @@
 from src.training._utils import progress_bar_scan
-from src.utils import smap
+from src.utils._jax_utils import smap
 
 import jax
 import jax.numpy as jnp

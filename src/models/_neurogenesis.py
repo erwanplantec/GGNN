@@ -27,18 +27,23 @@ class NeuroGenesis(eqx.Module):
     nincr_fn: t.Callable
     eincr_fn: t.Callable
     prob_fn: t.Callable
+    gen_fn: t.Callable
     sigma: float
     max_nodes: int
     max_edges: int
+    connect: bool
     #-------------------------------------------------------------------
     
     def __init__(self, prob_fn: t.Callable, max_nodes: int, max_edges: int,
-                 conditional_call: bool = False, sigma: float = 0.):
+                 connect: bool=True, conditional_call: bool = False, 
+                 gen_fn: t.Callable = lambda x: x, sigma: float = 0.):
         
         self.prob_fn = prob_fn
         self.max_nodes = max_nodes
         self.max_edges = max_edges
+        self.gen_fn = gen_fn
         self.sigma = sigma
+        self.connect = connect
         
         mat_n = incr_matrix(max_nodes)
         def incr_nodes(anodes, n):
@@ -72,23 +77,33 @@ class NeuroGenesis(eqx.Module):
         n_divs = jnp.clip(jnp.where(divs, 1, 0).sum(), 0, allowed)
         
         nanodes = self.nincr_fn(anodes, n_divs) #add new active nodes
-        naedges = self.eincr_fn(aedges, n_divs) #add new active edges
-        
-        mask_new_nodes = nanodes * (1-anodes)
-        mask_new_edges = naedges * (1-aedges)
-        
+
         trgets = jnp.cumsum(divs) * divs - divs
         trgets = jnp.where(divs, trgets.astype(int), -1) + n_edges * divs.astype(int)
-        nsend = jax.ops.segment_sum(ids, trgets, self.max_edges)
-        nsend = (send * (1-mask_new_edges) + nsend).astype(int)
-        
-        nrec = (jnp.cumsum(mask_new_edges)-1) * mask_new_edges + (n_active * mask_new_edges)
-        nrec = (rec * (1-mask_new_edges) + nrec).astype(int)
+        mask_new_nodes = nanodes * (1-anodes)
+        new_nodes = jax.ops.segment_sum(jax.vmap(self.gen_fn)(nodes), trgets, self.max_nodes)
+        new_nodes = new_nodes + (jr.normal(key_nodes, nodes.shape) * mask_new_nodes[..., None] * self.sigma)
 
-        #new_nodes = nodes + jr.normal(key_nodes, nodes.shape) * mask_new_nodes[..., None] 
-        new_nodes = jax.ops.segment_sum(nodes, trgets, self.max_nodes)
-        ne_nodes = new_nodes + (jr.normal(key_nodes, nodes.shape) * mask_new_nodes[..., None] * self.sigma)
-        new_edges = edges + jr.normal(key_edges, edges.shape) * mask_new_edges[..., None] 
+        if self.connect:
+            naedges = self.eincr_fn(aedges, n_divs) #add new active edges
+            
+            mask_new_edges = naedges * (1-aedges)
+            
+            nsend = jax.ops.segment_sum(ids, trgets, self.max_edges)
+            nsend = (send * (1-mask_new_edges) + nsend).astype(int)
+            
+            nrec = (jnp.cumsum(mask_new_edges)-1) * mask_new_edges + (n_active * mask_new_edges)
+            nrec = (rec * (1-mask_new_edges) + nrec).astype(int)
+
+            new_edges = edges + jr.normal(key_edges, edges.shape) * mask_new_edges[..., None] 
+
+            nrec = jnp.where(naedges, nrec, self.max_nodes-1)
+            nsend = jnp.where(naedges, nsend, self.max_nodes-1)
+        else:
+            nsend = send
+            nrec = rec
+            new_edges = edges
+            naedges = aedges
         
         return graph._replace(nodes=new_nodes,
                               edges=new_edges,

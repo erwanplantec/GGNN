@@ -18,6 +18,12 @@ from src.models._graph import GGraph
 def cosine_similarity(x, y):
     return jnp.dot(x, y) / (jnp.sqrt(jnp.sum(x**2)*jnp.sum(y**2))+1e-8)
 
+def euclidean_dist(x, y):
+    return jnp.sqrt(jnp.sum(jnp.square(x-y), axis=-1))
+
+def jin(x, v):
+    return jnp.where(x==v, True, False).any()
+
 class SynaptoGenesis(eqx.Module):
 
     """
@@ -41,20 +47,31 @@ class SynaptoGenesis(eqx.Module):
     prob_fn: t.Callable
     max_nodes: int
     max_edges: int
+    threshold_fn: t.Callable
     eincr_fn: t.Callable
-    dist_fn: t.Callable
+    score_fn: t.Callable
+    select_mode: str
     self_loops: bool
     #-------------------------------------------------------------------
 
-    def __init__(self, prob_fn: t.Callable, query_fn: t.Callable, max_nodes: int, 
-                 max_edges: int, dist_fn: t.Callable=cosine_similarity, self_loops: bool = False):
+    def __init__(self, 
+                 prob_fn: t.Callable, 
+                 query_fn: t.Callable, 
+                 max_nodes: int, 
+                 max_edges: int, 
+                 score_fn: t.Callable = cosine_similarity, 
+                 select_mode: str = "softmax",
+                 threshold: float = -jnp.inf,
+                 self_loops: bool = False):
         
         self.query_fn = query_fn
         self.prob_fn = prob_fn
         self.max_nodes = max_nodes
         self.max_edges = max_edges
-        self.dist_fn = dist_fn
+        self.score_fn = score_fn
         self.self_loops = self_loops
+        self.select_mode = select_mode
+        self.threshold_fn = lambda scores: scores.max(-1)>threshold
         
         mat_e = incr_matrix(max_edges)
         def incr_edges(aedges, n):
@@ -66,7 +83,7 @@ class SynaptoGenesis(eqx.Module):
     #-------------------------------------------------------------------
 
     @ejit
-    def __call__(self, graph: GGraph, key: jr.PRNGKey, mode: str = "soft"):
+    def __call__(self, graph: GGraph, key: jr.PRNGKey):
         
         key_prob, key_edges, key_samp = jr.split(key, 3)
         nodes, edges, rec, send, anodes, aedges, *_ = graph
@@ -75,37 +92,53 @@ class SynaptoGenesis(eqx.Module):
         n_active = anodes.sum().astype(int)
         e_active = aedges.sum().astype(int)
         
+        # 1. Get dividing nodes
         probs = jax.vmap(self.prob_fn)(nodes)[..., 0]
-        gens = jr.uniform(key_prob, (self.max_nodes,)) < probs * anodes
+        gens = jr.uniform(key_prob, (self.max_nodes,)) < (probs * anodes)
         gens = gens.astype(float)
+
+        # 2. Compute scores
+        queries = evmap(self.query_fn)(nodes)
+        values = nodes
+        scores = evmap(evmap(self.score_fn, in_axes=(None, 0)), in_axes=(0, None))(queries, values)
+        scores = jnp.clip(scores, -1e4, 1e4)
+        scores = jnp.where(anodes[None, :], scores, -1e10)
+        gens = gens * self.threshold_fn(scores).astype(float) #If no satisfying candidate
+        if not self.self_loops:
+            scores = jnp.where(jnp.identity(self.max_nodes), -1e10, scores)
         
+        # 3. Sample receivers
+        if self.select_mode == "softmax":
+            select = jnp.where(gens, jr.categorical(key_samp, scores, axis=-1).astype(int), 0) 
+        elif self.select_mode == "hardmax":
+            select = jnp.where(gens, jnp.argmax(scores, axis=-1).astype(int), 0)
+
+        # 4. Check if edge exist
+        is_s = nids[:, None]==send[None, :]# (n, e)
+        is_r = select[:, None]==rec[None, :]
+        exist = jnp.logical_and(is_s, is_r).any(-1) & gens.astype(bool)
+        gens = jnp.where(exist, 0., gens)
+        
+        # 5. Add new edges
         allowed = self.max_edges - e_active - 1
         n_gens = jnp.clip(gens.astype(int).sum(), 0, allowed)
         naedges = self.eincr_fn(aedges, n_gens)
         mask_new_edges = naedges * (1-aedges)
-        
         new_edges = edges + jr.normal(key_edges, edges.shape) * mask_new_edges[..., None]
         
-        trgets = jnp.cumsum(gens) * gens - gens
-        trgets = jnp.where(gens, trgets.astype(int), -1) + e_active * gens.astype(int)
+        # 6. Add new senders
+        trgets = (jnp.cumsum(gens) * gens - 1).astype(int) + (e_active * gens).astype(int)
         nsend = jax.ops.segment_sum(nids, trgets, self.max_edges)
-        nsend = (send * (1-mask_new_edges) + nsend).astype(int)
-        
-        queries = evmap(self.query_fn)(nodes)
-        values = nodes
-        scores = evmap(evmap(self.dist_fn, in_axes=(None, 0)), in_axes=(0, None))(queries, values)
-        scores = jnp.clip(scores, -1e4, 1e4)
-        scores = scores - (1.-anodes[None, :])*1e10
-        if not self.self_loops:
-            scores = scores - jnp.identity(self.max_nodes)*1e10
-        if mode == "soft":
-            select = jnp.where(gens, jr.categorical(key_samp, scores, axis=-1).astype(int), 0) 
-        elif mode == "hard":
-            select = jnp.where(gens, jnp.argmax(scores, axis=-1).astype(int), 0)
+        nsend = jnp.where(mask_new_edges, nsend, send)
+
+        # 7. Add receivers
         trgets = jnp.cumsum(gens) * gens - gens
         trgets = jnp.where(gens, trgets.astype(int), -1) + e_active * gens.astype(int)
         nrec = jax.ops.segment_sum(select, trgets, self.max_edges)
-        nrec = (rec * (1-mask_new_edges) + nrec).astype(int)
+        nrec = jnp.where(mask_new_edges, nrec, rec)
+
+        nrec = jnp.where(naedges, nrec, self.max_nodes-1)
+        nsend = jnp.where(naedges, nsend, self.max_nodes-1)
 
         return graph._replace(edges        = new_edges, 
                               senders      = nsend,

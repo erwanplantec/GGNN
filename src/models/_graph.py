@@ -22,4 +22,5 @@ class GGraph(t.NamedTuple):
     n_edge: int = 1
     time: int = 0
     globals: jnp.array = None
+    infos: t.Collection = {}
 

@@ -36,7 +36,7 @@ def rollout(model: t.Callable, graph: GGraph, key: jr.PRNGKey, steps: int):
     def _step(carry, x):
         graph, key = carry
         key, skey = jr.split(key)
-        return [model(graph, key=skey), key], graph
+        return [model(graph, key=skey)._replace(time=graph.time+1), key], graph
 
     return jax.lax.scan(_step, [graph, key], jnp.arange(steps))
 
@@ -91,3 +91,34 @@ def get_active_graph(graph: GGraph):
                            senders      = graph.senders[edge_mask],
                            active_edges = graph.active_edges[edge_mask],
                            active_nodes = graph.active_nodes[node_mask])
+
+class Block(eqx.Module):
+
+    cond_fn: t.Callable
+    module: t.Callable
+
+    def __init__(self, module:t.Callable, cond_fn: t.Callable):
+        self.cond_fn = cond_fn
+        self.module = module
+
+    def __call__(self, graph: GGraph, key: jr.PRNGKey):
+        return jax.lax.cond(
+            self.cond_fn(graph, key),
+            lambda g, k: self.module(g, k),
+            lambda g, k: g,
+            graph, key
+        )
+
+class Clamp(eqx.Module):
+
+    idxs: list
+    values: jax.Array
+
+    def __init__(self, nodes_idx: t.Union[list, int], values: jax.Array):
+        if isinstance(nodes_idx, list):
+            assert len(nodes_idx) == values.shape[0]
+        self.idxs = nodes_idx
+        self.values = values
+
+    def __call__(self, graph, key):
+        return graph._replace(nodes=nodes.at[self.idxs].set(self.values))

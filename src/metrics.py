@@ -9,8 +9,8 @@ from equinox import filter_jit as ejit, filter_vmap as evmap, filter_pmap as epm
 from functools import partial
 import networkx as nx
 
-from src.utils import jraph_to_nx
-from src.models import GGraph
+from src.utils._graph_utils import jraph_to_nx
+from src.models._graph import GGraph
 
 @jax.jit
 def in_degrees(g: GGraph):
@@ -77,6 +77,7 @@ graph_metrics_fn = {
     "n_nodes":        lambda g, dnxg, nxg: jnp.sum(g.active_nodes),
     "n_edges":        lambda g, dnxg, nxg: jnp.sum(g.active_edges),
     "avg_degree":     lambda g, dnxg, nxg: avg_degree(g),
+    "density":        lambda g, dnxg, nxg: density(g), 
     "modularity":     lambda g, dnxg, nxg: nx.community.modularity(nxg, nx.community.greedy_modularity_communities(nxg)),
     "g_efficiency":   lambda g, dnxg, nxg: nx.global_efficiency(nxg),
     "l_efficiency":   lambda g, dnxg, nxg: nx.local_efficiency(nxg),
@@ -88,12 +89,12 @@ graph_metrics_fn = {
     #"non_randomness": lambda g, dnxg, nxg: nx.non_randomness(nxg)[1], #Error if not connected
     #"sw_omega":       lambda g, dnxg, nxg: nx.omega(nxg), #Slow and error if not connected
     "sw_sigma":       lambda g, dnxg, nxg: nx.sigma(nxg) if nx.is_connected(nxg) else 0., #Error if not connected
-    "rich_club":      lambda g, dnxg, nxg: rich_club(nxg), #Error if self-loops
+    #"rich_club":      lambda g, dnxg, nxg: rich_club(nxg), #Error if self-loops
     # "wiener_index":   lambda g, dnxg, nxg: nx.wiener_index(nxg), #Can throw inf
     #"fractal_dims":   lambda g, dnxg, nxg: cbb(network(nxg), 1, True)
-    "communities":    lambda g, dnxg, nxg: len(nx.connected_components(nxg)),
+    "communities":    lambda g, dnxg, nxg: len(list(nx.strongly_connected_components(dnxg))),
     "isolates":       lambda g, dnxg, nxg: nx.number_of_isolates(nxg),
-    "assortativity":    lambda g, dnxg, nxg: nx.degree_pearson_correlation_coefficient(nxg)
+    "assortativity":  lambda g, dnxg, nxg: nx.degree_pearson_correlation_coefficient(nxg)
 }
 
 graph_metrics_names = list(graph_metrics_fn.keys())

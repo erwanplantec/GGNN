@@ -13,20 +13,23 @@ from functools import partial
 class WeibullDegeneracy(eqx.Module):
 
     """
-    When called, remove some edges with probability <proba>
-    Args:
-        - proba (float): probability of doing smthing
-        - strength (float): proba that an edge is removed
     """
     #-------------------------------------------------------------------
-    frequency: float
     generator: t.Callable
+    get_ratio: t.Callable
     #-------------------------------------------------------------------
 
-    def __init__(self, frequency: float, scale: float=1., concentration: float=1., max_freq: float=.9):
+    def __init__(self, frequency: float, scale: float=1., concentration: float=1., max_freq: float=.9,
+                 threshold: float=.1):
         
-        self.frequency = frequency
         self.generator = partial(jr.weibull_min, concentration=concentration, scale=scale)
+        def get_ratio(t, key):
+            base_freq=frequency[t % len(frequency)]
+            mod = self.generator(key)
+            ratio = jnp.clip(base_freq * mod, 0., .9)
+            ratio = jnp.where(ratio<threshold, 0., ratio)
+            return ratio
+        self.get_ratio = get_ratio
 
     #-------------------------------------------------------------------
 
@@ -34,12 +37,8 @@ class WeibullDegeneracy(eqx.Module):
 
         key_w, key_rm = jr.split(key)
         n_edge = graph.active_edges.sum()
-        mod = self.generator(key_w)
-        freq = jnp.clip(self.frequency * mod, 0., .9)
-        n_rm = freq * n_edge
-        proba = n_rm / n_edge
-        return self._rm_edges(graph, proba, key_rm)
-
+        ratio = self.get_ratio(graph.time, key_w)
+        return self._rm_edges(graph, ratio, key_rm)
     #-------------------------------------------------------------------
 
     def _rm_edges(self, graph: GGraph, proba: float, key: jr.PRNGKey):

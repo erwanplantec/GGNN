@@ -1,5 +1,6 @@
 from src.models._graph import GGraph
 from src.models._gnca import GNCA
+from src.metrics import in_degrees, out_degrees
 
 import jax
 import jax.numpy as jnp
@@ -47,7 +48,12 @@ class GRNCA(GNCA):
             #1. Compute messages
             m = jax.vmap(self.message_fn)(graph.nodes)
             #2. Aggregate messages
-            m = self.aggr_fn(m[graph.senders], graph.receivers, graph.nodes.shape[0])
+            mf = self.aggr_fn(m[graph.senders], graph.receivers, graph.nodes.shape[0])
+            if self.backward:
+                mb = self.aggr_fn(m[graph.receivers], graph.senders, graph.nodes.shape[0])
+                m = jnp.concatenate([mf, mb], axis=-1)
+            else :
+                m = mf 
         else:
             #1. Update edges
             edges = self.edge_fn(
@@ -62,6 +68,9 @@ class GRNCA(GNCA):
             m = self.aggr_fn(m, graph.receivers, graph.nodes.shape[0])
 
         #3. Update nodes
+        if self.degree_normalization:
+            d = in_degrees(graph)[:, None]
+            m = jnp.where(d>0, m/d, 0.)
         nodes = jax.vmap(self.node_fn)(m, graph.nodes)
 
         return graph._replace(nodes=nodes, edges=edges)

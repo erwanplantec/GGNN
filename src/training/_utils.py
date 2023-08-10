@@ -83,23 +83,19 @@ def progress_bar_scan(num_samples, message=None):
 
 
 def plot_scan(func, freq=100, getter=lambda x, y: (x, x, y), clear=True):
-
     xs = []
     ys = []
-
     def _plot():
         if clear:
             clear_output()
         plt.scatter(xs, ys)
         plt.show()
-
     def _save_and_plot(ixy):
         i, x, y = ixy
         xs.append(x)
         ys.append(y)
         if not i % freq and i:
             _plot() 
-
     def _func(carry, x):
         carry, y = func(carry, x)
         host_callback.call(
@@ -107,7 +103,6 @@ def plot_scan(func, freq=100, getter=lambda x, y: (x, x, y), clear=True):
             getter(x, y)
         )
         return carry, y
-
     return _func
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-from src.models import GGraph
+from src.models._graph import GGraph
 
 import jax
 import jax.numpy as jnp
