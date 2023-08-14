@@ -27,6 +27,7 @@ class NeuroGenesis(eqx.Module):
     nincr_fn: t.Callable
     eincr_fn: t.Callable
     prob_fn: t.Callable
+    threshold: t.Optional[jax.Array]
     gen_fn: t.Callable
     sigma: float
     max_nodes: int
@@ -35,8 +36,8 @@ class NeuroGenesis(eqx.Module):
     #-------------------------------------------------------------------
     
     def __init__(self, prob_fn: t.Callable, max_nodes: int, max_edges: int,
-                 connect: bool=True, conditional_call: bool = False, 
-                 gen_fn: t.Callable = lambda x: x, sigma: float = 0.):
+                 connect: bool=True, gen_fn: t.Callable = lambda x: x, 
+                 threshold: float = None, sigma: float = 0.):
         
         self.prob_fn = prob_fn
         self.max_nodes = max_nodes
@@ -44,6 +45,7 @@ class NeuroGenesis(eqx.Module):
         self.gen_fn = gen_fn
         self.sigma = sigma
         self.connect = connect
+        self.threshold = threshold
         
         mat_n = incr_matrix(max_nodes)
         def incr_nodes(anodes, n):
@@ -64,7 +66,7 @@ class NeuroGenesis(eqx.Module):
     @ejit
     def __call__(self, graph: GGraph, key: jr.PRNGKey):
         
-        key_div, key_nodes, key_edges = jr.split(key, 3)
+        key, key_div = jr.split(key)
         nodes, edges, rec, send, anodes, aedges, *_ = graph
         n_active = anodes.sum().astype(int)
         n_edges = aedges.sum().astype(int)
@@ -73,9 +75,28 @@ class NeuroGenesis(eqx.Module):
         
         allowed = self.max_nodes - n_active - 1
         probs = jax.vmap(self.prob_fn)(nodes)[..., 0] * anodes
-        divs = jnp.where(jr.uniform(key_div, (nodes.shape[0],)) < probs, 1., 0.)
-        n_divs = jnp.clip(jnp.where(divs, 1, 0).sum(), 0, allowed)
-        
+        if self.threshold is None:
+            divs = jnp.where(jr.uniform(key_div, (nodes.shape[0],)) < probs, 1., 0.)
+        else :
+            divs = jnp.where(probs>self.threshold, 1., 0.)
+
+        return jax.lax.cond(divs.astype(bool).any(),
+                            self.add_nodes,
+                            lambda g, *_: g,
+                            graph, divs, key)
+
+    #-------------------------------------------------------------------
+
+    def add_nodes(self, graph, divs, key):
+
+        key, key_edges, key_nodes = jr.split(key, 3)
+
+        nodes, edges, rec, send, anodes, aedges, *_ = graph
+        n_active = anodes.sum().astype(int)
+        n_edges = aedges.sum().astype(int)
+        ids = jnp.arange(self.max_nodes)
+        eids = jnp.arange(self.max_edges)
+
         nanodes = self.nincr_fn(anodes, n_divs) #add new active nodes
 
         trgets = jnp.cumsum(divs) * divs - divs

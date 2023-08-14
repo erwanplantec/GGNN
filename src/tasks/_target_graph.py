@@ -32,7 +32,7 @@ def TargetGraphTask(statics: t.Collection, init_graph: GGraph, target_graph: GGr
     def _eval(key, params):
         
         model = eqx.combine(params, statics)
-        graph, _ = model(init_graph, key, grow_iters, return_traj=True, init=model_init)
+        graph, graphs = model(init_graph, key, grow_iters, return_traj=True, init=model_init)
 
         loss = 0.
         
