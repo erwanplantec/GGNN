@@ -97,6 +97,7 @@ class NeuroGenesis(eqx.Module):
         ids = jnp.arange(self.max_nodes)
         eids = jnp.arange(self.max_edges)
 
+        n_divs = divs.astype(int).sum()
         nanodes = self.nincr_fn(anodes, n_divs) #add new active nodes
 
         trgets = jnp.cumsum(divs) * divs - divs
